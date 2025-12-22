@@ -1,5 +1,6 @@
 import { MemoryCache } from "../cache/memoryCache";
 import { createLogger } from "../utils/logger";
+import { safeExecute, fetchWithRetry } from "../utils/fetch";
 import type {
   MergedLinks,
   SearchRequest,
@@ -182,30 +183,33 @@ export class SearchService {
         ? requestedTimeout
         : this.options.pluginTimeoutMs || 0
     );
+
+    // 使用 safeExecute 包装每个频道的搜索，确保单个频道失败不影响整体
     const runnerTasks = chList.map(
       (ch) => async () =>
-        this.withTimeout<SearchResult[]>(
-          fetchTgChannelPosts(ch, keyword, {
-            limitPerChannel: perChannelLimit,
-          }),
-          timeoutMs,
-          []
+        safeExecute(
+          () =>
+            this.withTimeout<SearchResult[]>(
+              fetchTgChannelPosts(ch, keyword, {
+                limitPerChannel: perChannelLimit,
+              }),
+              timeoutMs,
+              []
+            ),
+          [],
+          logger.child(`tg:${ch}`)
         )
     );
     const concurrency = Math.max(
       2,
       Math.min(concurrencyOverride ?? this.options.defaultConcurrency, 12)
     );
-    let resultsByChannel: SearchResult[][] = [];
-    try {
-      resultsByChannel = await this.runWithConcurrency(
-        runnerTasks,
-        concurrency
-      );
-    } catch (error) {
-      logger.error("TG search failed", error);
-      return [];
-    }
+
+    // 并行执行频道搜索
+    const resultsByChannel = await this.runWithConcurrency(
+      runnerTasks,
+      concurrency
+    );
     const results: SearchResult[] = [];
     for (const arr of resultsByChannel) {
       if (Array.isArray(arr)) results.push(...(arr as SearchResult[]));
@@ -260,42 +264,61 @@ export class SearchService {
         ? requestedTimeout
         : this.options.pluginTimeoutMs || 0
     );
-    const tasks = available.map((p) => async () => {
+
+    // 使用 safeExecuteAll 统一处理错误，避免单个插件失败影响整体
+    const pluginPromises = available.map((p) => async () => {
       p.setMainCacheKey(cacheKey);
       p.setCurrentKeyword(keyword);
-      try {
-        let results = await this.withTimeout<SearchResult[]>(
-          p.search(keyword, ext),
-          timeoutMs,
-          []
-        );
-        // 当关键词过短（如 "1"）且无结果时，尝试通用兜底词以验证插件可用性
-        if (
-          (!results || results.length === 0) &&
-          (keyword || "").trim().length <= 1
-        ) {
-          const fallbacks = ["电影", "movie", "1080p"];
-          for (const fb of fallbacks) {
-            results = await this.withTimeout<SearchResult[]>(
-              p.search(fb, ext),
-              timeoutMs,
-              []
-            );
-            if (results && results.length > 0) break;
+
+      // 主搜索
+      let results = await this.withTimeout<SearchResult[]>(
+        p.search(keyword, ext),
+        timeoutMs,
+        []
+      );
+
+      // 短关键词兜底逻辑
+      if (
+        (!results || results.length === 0) &&
+        (keyword || "").trim().length <= 1
+      ) {
+        const fallbacks = ["电影", "movie", "1080p"];
+        for (const fb of fallbacks) {
+          const fallbackResults = await this.withTimeout<SearchResult[]>(
+            p.search(fb, ext),
+            timeoutMs,
+            []
+          );
+          if (fallbackResults && fallbackResults.length > 0) {
+            results = fallbackResults;
+            break;
           }
         }
-        return results || [];
-      } catch (error) {
-        logger.warn(`Plugin ${p.name()} failed`, error);
-        return [] as SearchResult[];
       }
+
+      return results || [];
     });
 
-    const resultsByPlugin = await this.runWithConcurrency(tasks, concurrency);
-    const merged: SearchResult[] = [];
-    for (const arr of resultsByPlugin) merged.push(...arr);
+    // 使用并发控制执行，同时利用 safeExecuteAll 提供统一错误处理
+    const resultsByPlugin = await this.runWithConcurrency(
+      pluginPromises.map((promiseFactory) => async () => {
+        return await safeExecute(
+          promiseFactory,
+          [],
+          logger.child(`plugin:${promiseFactory.name || "unknown"}`)
+        );
+      }),
+      concurrency
+    );
 
-    if (cacheEnabled) {
+    const merged: SearchResult[] = [];
+    for (const arr of resultsByPlugin) {
+      if (Array.isArray(arr)) {
+        merged.push(...arr);
+      }
+    }
+
+    if (cacheEnabled && merged.length > 0) {
       this.pluginCache.set(cacheKey, merged, cacheTtlMinutes * 60_000);
       logger.debug("Plugin cache stored", { keyword, results: merged.length });
     }
