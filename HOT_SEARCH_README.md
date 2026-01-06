@@ -4,25 +4,31 @@
 
 ✅ **已解决**：首页空白无热搜问题
 
-实现了完整的动态热搜系统，使用 SQLite 持久化存储，支持智能分类和实时更新。
+实现了完整的动态热搜系统，支持 SQLite 持久化存储和智能内存降级。
 
 ## 🚀 快速开始
 
-### 1. 安装依赖
-```bash
-pnpm add better-sqlite3
-```
-
-### 2. 启动开发服务器
+### 1. 启动开发服务器（无需额外配置）
 ```bash
 pnpm dev
 ```
 
-### 3. 测试功能
+系统会自动检测并选择最佳存储模式：
+- ✅ **SQLite 模式**：数据持久化（需要安装 better-sqlite3）
+- ✅ **内存模式**：功能完整，重启后数据丢失（默认）
+
+### 2. 测试功能
 1. 访问 `http://localhost:3000`
 2. 搜索任意关键词（如 "电影"）
 3. 刷新页面查看热搜推荐
 4. 点击标签页测试分类过滤
+
+### 3. （可选）安装 SQLite 支持
+如果需要数据持久化，安装 better-sqlite3：
+```bash
+pnpm add better-sqlite3
+```
+> Windows 用户可能需要 Visual Studio Build Tools，详见 `SQLITE安装指南.md`
 
 ## 📊 API 接口
 
@@ -93,14 +99,24 @@ pnpm test test/hot-search.test.ts
 
 ## ⚠️ 注意事项
 
-### better-sqlite3 安装失败
-如果安装失败，系统会自动降级到内存模式（重启后数据丢失）
+### Windows 安装 better-sqlite3
+Windows 用户可能需要安装 Visual Studio Build Tools：
+- 查看 `SQLITE安装指南.md` 获取详细步骤
+- 或直接使用内存模式（无需安装任何东西）
+
+### 内存模式 vs SQLite 模式
+| 特性 | 内存模式 | SQLite 模式 |
+|------|---------|-------------|
+| 数据持久化 | ❌ 重启丢失 | ✅ 永久保存 |
+| 安装要求 | ✅ 无需安装 | ⚠️ 需要编译环境 |
+| 功能完整性 | ✅ 完整 | ✅ 完整 |
+| 适用场景 | 开发/测试 | 生产环境 |
 
 ### Cloudflare Workers 部署
 不支持文件系统，需要使用 Cloudflare D1 或 KV 替代 SQLite
 
 ### 数据目录权限
-确保 `./data/` 目录有写入权限
+确保 `./data/` 目录有写入权限（SQLite 模式）
 
 ## 📁 文件清单
 

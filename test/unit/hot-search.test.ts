@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { HotSearchSQLiteService } from '../server/core/services/hotSearchSQLite';
+import { HotSearchSQLiteService } from '../../server/core/services/hotSearchSQLite';
 
 describe('HotSearchSQLiteService', () => {
   let service: HotSearchSQLiteService;
