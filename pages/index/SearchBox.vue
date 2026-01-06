@@ -29,8 +29,9 @@
           @touchend="handleTouchEnd" />
 
         <div class="search-actions">
+          <!-- 清空按钮 -->
           <button
-            v-if="modelValue && !loading"
+            v-if="modelValue && !loading && !paused"
             class="action-btn ghost"
             type="button"
             @click="
@@ -46,10 +47,43 @@
             </svg>
           </button>
 
-          <div v-if="loading" class="loading-spinner"></div>
-
+          <!-- 暂停按钮 -->
           <button
-            v-else
+            v-if="loading && !paused"
+            class="action-btn pause"
+            type="button"
+            @click="$emit('pause')"
+            @touchstart="handleTouchStart"
+            @touchend="handleTouchEnd"
+            title="暂停搜索">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="6" y="4" width="4" height="16" rx="1"></rect>
+              <rect x="14" y="4" width="4" height="16" rx="1"></rect>
+            </svg>
+            <span class="btn-text">暂停</span>
+          </button>
+
+          <!-- 继续按钮 -->
+          <button
+            v-if="loading && paused"
+            class="action-btn resume"
+            type="button"
+            @click="$emit('continue')"
+            @touchstart="handleTouchStart"
+            @touchend="handleTouchEnd"
+            title="继续搜索">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 3l14 9-14 9V3z"></path>
+            </svg>
+            <span class="btn-text">继续</span>
+          </button>
+
+          <!-- 加载动画 -->
+          <div v-if="loading && !paused" class="loading-spinner"></div>
+
+          <!-- 搜索按钮 -->
+          <button
+            v-else-if="!loading"
             class="action-btn primary"
             type="button"
             :disabled="!modelValue"
@@ -61,6 +95,14 @@
               <path d="M5 12h14M12 5l7 7-7 7"></path>
             </svg>
           </button>
+
+          <!-- 暂停状态提示 -->
+          <div v-if="paused" class="paused-indicator" title="搜索已暂停">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="12" cy="12" r="10" opacity="0.2"></circle>
+              <rect x="8" y="8" width="8" height="8" rx="1"></rect>
+            </svg>
+          </div>
         </div>
       </div>
     </div>
@@ -71,9 +113,10 @@
 const props = defineProps<{
   modelValue: string;
   loading: boolean;
+  paused: boolean;
   placeholder: string;
 }>();
-const emit = defineEmits(["update:modelValue", "search", "reset"]);
+const emit = defineEmits(["update:modelValue", "search", "reset", "pause", "continue"]);
 
 const isFocused = ref(false);
 const inputEl = ref<HTMLInputElement | null>(null);
@@ -289,6 +332,55 @@ onMounted(() => {
   background: var(--border-light);
 }
 
+/* 暂停按钮 - 黄色警告样式 */
+.action-btn.pause {
+  background: linear-gradient(135deg, #f59e0b, #fbbf24);
+  color: white;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+}
+
+.action-btn.pause:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(245, 158, 11, 0.4);
+}
+
+.action-btn.pause:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* 继续按钮 - 绿色成功样式 */
+.action-btn.resume {
+  background: linear-gradient(135deg, #10b981, #34d399);
+  color: white;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
+.action-btn.resume:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.4);
+}
+
+.action-btn.resume:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* 暂停状态指示器 */
+.paused-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: #f59e0b;
+  flex-shrink: 0;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
 /* 按钮图标 */
 .action-btn svg {
   stroke: currentColor;
@@ -334,7 +426,9 @@ onMounted(() => {
     font-size: 13px;
   }
 
-  .action-btn.primary .btn-text {
+  .action-btn.primary .btn-text,
+  .action-btn.pause .btn-text,
+  .action-btn.resume .btn-text {
     display: none; /* 在小屏幕上只显示图标 */
   }
 
@@ -342,9 +436,19 @@ onMounted(() => {
     padding: 6px;
   }
 
+  .action-btn.pause,
+  .action-btn.resume {
+    padding: 8px;
+  }
+
   .loading-spinner {
     width: 18px;
     height: 18px;
+  }
+
+  .paused-indicator {
+    width: 28px;
+    height: 28px;
   }
 }
 

@@ -19,9 +19,12 @@
     <SearchBox
       v-model="kw"
       :loading="searchState.loading"
+      :paused="searchState.paused"
       :placeholder="placeholder"
       @search="onSearch"
-      @reset="resetSearch" />
+      @reset="resetSearch"
+      @pause="pauseSearch"
+      @continue="handleContinueSearch" />
 
     <!-- 统计和过滤器 -->
     <div v-if="searchState.searched" class="stats-bar">
@@ -35,9 +38,13 @@
             <span class="stat-label">用时</span>
             <span class="stat-value">{{ searchState.elapsedMs }}ms</span>
           </span>
-          <span v-if="searchState.deepLoading" class="loading-indicator">
+          <span v-if="searchState.deepLoading && !searchState.paused" class="loading-indicator">
             <span class="pulse-dot"></span>
             <span class="loading-text">持续搜索中...</span>
+          </span>
+          <span v-if="searchState.paused" class="paused-indicator-bar">
+            <span class="pause-icon">⏸</span>
+            <span class="paused-text">搜索已暂停</span>
           </span>
         </div>
 
@@ -178,14 +185,12 @@ const initialVisible = 3;
 const expandedSet = ref<Set<string>>(new Set());
 
 // 使用新的搜索 composable
-const { state: searchState, performSearch, resetSearch, copyLink } = useSearch();
+const { state: searchState, performSearch, resetSearch, copyLink, pauseSearch, continueSearch } = useSearch();
 const { settings } = useSettings();
 
-// 搜索执行
-async function onSearch() {
-  if (!kw.value || searchState.value.loading) return;
-
-  await performSearch({
+// 获取搜索选项
+function getSearchOptions() {
+  return {
     apiBase,
     keyword: kw.value,
     settings: {
@@ -194,13 +199,26 @@ async function onSearch() {
       concurrency: settings.value.concurrency,
       pluginTimeoutMs: settings.value.pluginTimeoutMs,
     },
-  });
+  };
+}
+
+// 搜索执行
+async function onSearch() {
+  if (!kw.value || searchState.value.loading) return;
+
+  await performSearch(getSearchOptions());
 }
 
 // 快速搜索
 async function quickSearch(keyword: string) {
   kw.value = keyword;
   await onSearch();
+}
+
+// 继续搜索（从暂停处继续）
+async function handleContinueSearch() {
+  if (!searchState.value.paused) return;
+  await continueSearch(getSearchOptions());
 }
 
 // 平台信息
@@ -419,6 +437,27 @@ function visibleSorted(items: any[]) {
   font-size: 13px;
   color: var(--primary);
   font-weight: 500;
+}
+
+/* 暂停状态指示器（统计栏） */
+.paused-indicator-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(245, 158, 11, 0.1);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #f59e0b;
+  font-weight: 500;
+}
+
+.pause-icon {
+  font-size: 14px;
+}
+
+.paused-text {
+  font-size: 13px;
 }
 
 /* 平台过滤器 */

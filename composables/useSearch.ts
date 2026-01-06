@@ -15,6 +15,7 @@ export interface SearchOptions {
 export interface SearchState {
   loading: boolean;
   deepLoading: boolean;
+  paused: boolean;
   error: string;
   searched: boolean;
   elapsedMs: number;
@@ -26,6 +27,7 @@ export function useSearch() {
   const state = ref<SearchState>({
     loading: false,
     deepLoading: false,
+    paused: false,
     error: "",
     searched: false,
     elapsedMs: 0,
@@ -44,6 +46,35 @@ export function useSearch() {
       } catch {}
     }
     activeControllers.length = 0;
+  }
+
+  // 暂停搜索
+  function pauseSearch(): void {
+    if (state.value.loading || state.value.deepLoading) {
+      state.value.paused = true;
+      // 取消当前的请求，但保留已获取的结果
+      cancelActiveRequests();
+      console.log("[useSearch] Search paused");
+    }
+  }
+
+  // 继续搜索（从暂停处继续）
+  async function continueSearch(options: SearchOptions): Promise<void> {
+    if (!state.value.paused || !state.value.searched) return;
+
+    state.value.paused = false;
+    state.value.deepLoading = true;
+    console.log("[useSearch] Search continued");
+
+    // 继续执行深度搜索
+    const mySeq = ++searchSeq;
+    try {
+      await performDeepSearch(options, mySeq);
+    } catch (error) {
+      console.warn("[useSearch] Continue search failed:", error);
+    } finally {
+      state.value.deepLoading = false;
+    }
   }
 
   // 合并按类型分组的结果
@@ -187,6 +218,8 @@ export function useSearch() {
 
     for (let i = 0; i < maxLen; i++) {
       if (mySeq !== searchSeq) break;
+      // 检查是否暂停
+      if (state.value.paused) break;
 
       const reqs: Array<Promise<SearchResponse | null>> = [];
 
@@ -335,6 +368,8 @@ export function useSearch() {
       // 2) 深度搜索
       state.value.deepLoading = true;
       await performDeepSearch(options, mySeq);
+      // 如果暂停了，停止后续操作
+      if (state.value.paused) return;
 
       // 3) 记录到热搜（异步，不阻塞搜索结果）
       if (mySeq === searchSeq) {
@@ -345,13 +380,17 @@ export function useSearch() {
       console.error("[useSearch] Search failed:", error);
     } finally {
       state.value.elapsedMs = Math.round(performance.now() - start);
-      state.value.loading = false;
+      // 如果暂停了，保持 loading 状态，只取消 deepLoading
+      if (!state.value.paused) {
+        state.value.loading = false;
+      }
       state.value.deepLoading = false;
       console.log("[useSearch] Search finished", {
         keyword,
         total: state.value.total,
         elapsedMs: state.value.elapsedMs,
         platforms: Object.keys(state.value.merged),
+        paused: state.value.paused,
       });
     }
   }
@@ -363,6 +402,7 @@ export function useSearch() {
     state.value = {
       loading: false,
       deepLoading: false,
+      paused: false,
       error: "",
       searched: false,
       elapsedMs: 0,
@@ -386,5 +426,7 @@ export function useSearch() {
     resetSearch,
     copyLink,
     cancelActiveRequests,
+    pauseSearch,
+    continueSearch,
   };
 }
