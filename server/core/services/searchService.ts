@@ -44,7 +44,7 @@ export class SearchService {
     cloudTypes: string[] | undefined,
     ext: Record<string, any> | undefined
   ): Promise<SearchResponse> {
-    console.log(`[SearchService] 🔍 用户搜索: "${keyword}"`);
+    // 日志已精简：只在搜索完成时打印结果，避免重复打印用户搜索词
 
     const effChannels =
       channels && channels.length > 0 ? channels : this.options.defaultChannels;
@@ -322,7 +322,6 @@ export class SearchService {
       this.pluginCache.set(cacheKey, merged, cacheTtlMinutes * 60_000);
     }
 
-    console.log(`[SearchService] ✅ 搜索完成 keyword="${keyword}" total=${merged.length}`);
     return merged;
   }
 
