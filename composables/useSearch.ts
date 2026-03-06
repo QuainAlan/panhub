@@ -196,9 +196,10 @@ export function useSearch() {
     }
   }
 
-  // 快速搜索（第一批）
+  // 快速搜索（第一批）- 实时更新版本
   async function performFastSearch(
-    options: SearchOptions
+    options: SearchOptions,
+    onProgress?: (incomingMerged: MergedLinks) => void
   ): Promise<MergedLinks> {
     const { apiBase, keyword, settings } = options;
     const conc = Math.min(16, Math.max(1, Number(settings.concurrency || 3)));
@@ -209,49 +210,65 @@ export function useSearch() {
     // TG 频道批次
     const fastTg = settings.enabledTgChannels.slice(0, batchSize);
 
-    const promises: Array<Promise<SearchResponse | null>> = [];
+    // 收集所有请求的 promise
+    const resultPromises: Array<Promise<SearchResponse | null>> = [];
 
-    // 插件请求
+    // 插件请求 - 立即发起并独立处理
     if (fastPlugins.length > 0) {
       const ac = new AbortController();
       activeControllers.push(ac);
-      promises.push(
-        executeSearchRequest(
-          `${apiBase}/search`,
-          {
-            kw: keyword,
-            res: "merged_by_type",
-            src: "plugin",
-            plugins: fastPlugins.join(","),
-            conc: conc,
-            ext: JSON.stringify({ __plugin_timeout_ms: settings.pluginTimeoutMs }),
-          },
-          ac
-        )
+      const pluginPromise = executeSearchRequest(
+        `${apiBase}/search`,
+        {
+          kw: keyword,
+          res: "merged_by_type",
+          src: "plugin",
+          plugins: fastPlugins.join(","),
+          conc: conc,
+          ext: JSON.stringify({ __plugin_timeout_ms: settings.pluginTimeoutMs }),
+        },
+        ac
       );
+      
+      // 每个请求完成后立即触发回调
+      pluginPromise.then(result => {
+        if (result?.merged_by_type && onProgress) {
+          onProgress(result.merged_by_type);
+        }
+      });
+      
+      resultPromises.push(pluginPromise);
     }
 
-    // TG 频道请求
+    // TG 频道请求 - 立即发起并独立处理
     if (fastTg.length > 0) {
       const ac = new AbortController();
       activeControllers.push(ac);
-      promises.push(
-        executeSearchRequest(
-          `${apiBase}/search`,
-          {
-            kw: keyword,
-            res: "merged_by_type",
-            src: "tg",
-            channels: fastTg.join(","),
-            conc: conc,
-            ext: JSON.stringify({ __plugin_timeout_ms: settings.pluginTimeoutMs }),
-          },
-          ac
-        )
+      const tgPromise = executeSearchRequest(
+        `${apiBase}/search`,
+        {
+          kw: keyword,
+          res: "merged_by_type",
+          src: "tg",
+          channels: fastTg.join(","),
+          conc: conc,
+          ext: JSON.stringify({ __plugin_timeout_ms: settings.pluginTimeoutMs }),
+        },
+        ac
       );
+      
+      // 每个请求完成后立即触发回调
+      tgPromise.then(result => {
+        if (result?.merged_by_type && onProgress) {
+          onProgress(result.merged_by_type);
+        }
+      });
+      
+      resultPromises.push(tgPromise);
     }
 
-    const results = await Promise.all(promises);
+    // 等待所有请求完成，返回合并后的最终结果
+    const results = await Promise.all(resultPromises);
     let merged: MergedLinks = {};
     for (const r of results) {
       if (r?.merged_by_type) {
@@ -408,17 +425,23 @@ export function useSearch() {
     const start = performance.now();
 
     try {
-      // 1) 快速搜索
-      const fastMerged = await performFastSearch(options);
+      // 1) 快速搜索 - 实时更新版本
+      let currentMerged: MergedLinks = {};
+      
+      const fastMerged = await performFastSearch(options, (incomingMerged) => {
+        // 每个接口返回后立即更新页面
+        if (mySeq !== searchSeq) return;
+        currentMerged = mergeMergedByType(currentMerged, incomingMerged);
+        setMerged(currentMerged);
+        setTotal(
+          Object.values(currentMerged).reduce(
+            (sum, arr) => sum + (arr?.length || 0),
+            0
+          )
+        );
+      });
+      
       if (mySeq !== searchSeq) return;
-
-      setMerged(fastMerged);
-      setTotal(
-        Object.values(fastMerged).reduce(
-          (sum, arr) => sum + (arr?.length || 0),
-          0
-        )
-      );
 
       // 2) 深度搜索
       setDeepLoading(true);
