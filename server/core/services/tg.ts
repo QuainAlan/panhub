@@ -2,6 +2,7 @@ import { load } from "cheerio";
 import { ofetch } from "ofetch";
 import type { SearchResult } from "../types/models";
 import { matchesSearchKeyword } from "../utils/searchKeyword";
+import { logger } from "../utils/logger";
 
 export interface TgFetchOptions {
   limitPerChannel?: number;
@@ -29,7 +30,9 @@ export async function fetchTgChannelPosts(
     let html = "";
     try {
       html = await ofetch<string>(url, { headers: { "user-agent": ua } });
-    } catch {}
+    } catch (e: any) {
+      logger.debug?.(`TG fetch failed for ${url}: ${e?.message || e}`);
+    }
 
     if (!html || !html.includes("tgme_widget_message")) {
       const mirrorUrl = before
@@ -38,7 +41,9 @@ export async function fetchTgChannelPosts(
 
       try {
         html = await ofetch<string>(mirrorUrl, { headers: { "user-agent": ua } });
-      } catch {}
+      } catch (e: any) {
+        logger.debug?.(`TG mirror fetch failed for ${mirrorUrl}: ${e?.message || e}`);
+      }
     }
 
     if (!html || !html.includes("tgme_widget_message")) {

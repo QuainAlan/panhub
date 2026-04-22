@@ -524,8 +524,8 @@ button {
     --bg-secondary: #161b22;
     --bg-glass: rgba(13, 17, 23, 0.82);
     --text-primary: #e6edf3;
-    --text-secondary: #9198a1;
-    --text-tertiary: #545d68;
+    --text-secondary: #a1aab5;
+    --text-tertiary: #7d8794;
     --border-light: #21262d;
     --border-medium: #30363d;
     --primary: #2dd4bf;

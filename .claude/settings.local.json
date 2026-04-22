@@ -15,7 +15,11 @@
       "mcp__plugin_playwright_playwright__browser_type",
       "mcp__plugin_playwright_playwright__browser_wait_for",
       "Bash(pnpm test *)",
-      "mcp__plugin_playwright_playwright__browser_close"
+      "mcp__plugin_playwright_playwright__browser_close",
+      "Bash(gh issue *)",
+      "Bash(pnpm install *)",
+      "Bash(pnpm build *)",
+      "Bash(git status *)"
     ]
   }
 }
