@@ -3,7 +3,7 @@
     <!-- 卡片头部 -->
     <div class="card-header">
       <div class="platform-badge" :style="{ background: color }">
-        <span class="platform-icon" v-html="icon"></span>
+        <img class="platform-icon" :src="icon" :alt="title" />
       </div>
       <div class="header-info">
         <h3 class="platform-title">{{ title }}</h3>
@@ -166,6 +166,9 @@ function formatDate(d?: string) {
 }
 
 .platform-icon {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.2));
 }
 
