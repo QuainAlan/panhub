@@ -38,7 +38,9 @@
       "Bash(curl -sL -o tianyi.png \"https://cloud.dlife.cn/web/main/logo.ico\")",
       "Bash(curl -sL -o mobile.png \"https://yun.139.com/w/static/img/LOGO.png\")",
       "Bash(curl -sL -o xunlei.png \"https://pan.xunlei.com/icon.png\")",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(vitest run *)",
+      "Bash(pnpm vitest *)"
     ]
   }
 }
