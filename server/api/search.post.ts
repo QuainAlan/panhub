@@ -1,0 +1,115 @@
+import { defineEventHandler, readBody, sendError, createError } from "h3";
+
+/** 从 H3 event 中提取客户端断开信号（兼容 h3 无 getAbortSignal 的版本） */
+function getClientAbortSignal(event: any): AbortSignal | undefined {
+  // 优先使用 h3 原生能力（若未来版本支持）
+  if (typeof event._signal === "object" && event._signal instanceof AbortSignal) {
+    return event._signal;
+  }
+  // 回退：监听 node req 的 close 事件
+  const req = event.node?.req;
+  if (req && typeof req.on === "function") {
+    const controller = new AbortController();
+    req.on("close", () => {
+      if (req.destroyed || req.writableEnded === false && req.readableEnded) {
+        controller.abort();
+      }
+    });
+    return controller.signal;
+  }
+  return undefined;
+}
+import { requireHumanOrCredential, requireWxAuth } from "../utils/requireAuth";
+import { parseList } from "../utils/parseQuery";
+import { getOrCreateSearchService } from "../core/services";
+import { getChannelConfigService } from "../core/services/channelConfigService";
+import {
+  buildBatchPlan,
+  sliceBatchChannels,
+  parseBatchQuery,
+} from "../core/utils/batchChannels";
+import type { GenericResponse, SearchRequest } from "../core/types/models";
+
+export default defineEventHandler(async (event) => {
+  // 爬虫/脚本 UA 直接 403，不执行搜索（防刷词持续占用服务器资源）
+  requireHumanOrCredential(event);
+  // 微信关注公众号登录态校验（恒强制）：
+  // - "ok"           → 放行
+  // - "unauthorized" → 无凭证或凭证失效 → 401 触发前端重新引导关注
+  const wxAuth = await requireWxAuth(event);
+  if (wxAuth === "unauthorized") {
+    throw createError({ statusCode: 401, statusMessage: "wx auth required" });
+  }
+  const config = useRuntimeConfig();
+  // 确保频道配置已加载（幂等）
+  await getChannelConfigService().ensureLoaded();
+  const service = getOrCreateSearchService(config);
+  const body = (await readBody<SearchRequest>(event)) || ({} as SearchRequest);
+
+  const kw = (body.kw || "").trim();
+  if (!kw) {
+    return sendError(
+      event,
+      createError({ statusCode: 400, statusMessage: "kw is required" })
+    );
+  }
+
+  body.channels = parseList(body.channels);
+  body.plugins = parseList(body.plugins);
+  body.cloud_types = parseList(body.cloud_types);
+
+  if (!body.res || body.res === "merge") body.res = "merged_by_type";
+  if (!body.src) body.src = "all";
+  if (body.src === "tg") body.plugins = undefined;
+  else if (body.src === "plugin") body.channels = undefined;
+
+  // countOnly：前端"问后端有 N 批"，不实际搜索，立即返回（零落地）
+  const requestedChannels = body.channels;
+  const { batch, batchSize, countOnly } = parseBatchQuery(body as any);
+  if (countOnly) {
+    const allChannels = getChannelConfigService().getSnapshot().defaultChannels;
+    const plan = buildBatchPlan(allChannels, batchSize);
+    const resp: GenericResponse<typeof plan> = {
+      code: 0,
+      message: "ok",
+      data: plan,
+    };
+    return resp;
+  }
+
+  // 决定本次要搜的频道（channels 显式 > batch 切片 > 一次性全量）
+  const allChannels = getChannelConfigService().getSnapshot().defaultChannels;
+  body.channels =
+    requestedChannels && requestedChannels.length > 0
+      ? requestedChannels
+      : batch != null
+      ? sliceBatchChannels(allChannels, batch, batchSize)
+      : allChannels;
+
+  const signal = getClientAbortSignal(event);
+
+  const { response: result, warnings } = await service.searchWithWarnings(
+    kw,
+    body.channels,
+    body.conc,
+    !!body.refresh,
+    body.res,
+    body.src,
+    body.plugins,
+    body.cloud_types,
+    body.ext || {},
+    signal
+  );
+
+  const resp: GenericResponse<typeof result> = {
+    code: 0,
+    message: warnings.length > 0 ? "partial_success" : "success",
+    data: result,
+  };
+
+  if (warnings.length > 0) {
+    (resp as any).warnings = warnings;
+  }
+
+  return resp;
+});

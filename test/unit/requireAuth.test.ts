@@ -1,0 +1,168 @@
+/**
+ * requireAuth（requireHumanOrCredential / requireWxAuth）单元测试
+ *
+ * 验证（开源版：蜜罐已下线，requireWxAuth 为二态，未认证统一 unauthorized）：
+ * - bot/第三方 API UA 无 Bearer → 403（入口拦截，不执行搜索）
+ * - bot/第三方 API UA 带 Bearer → 放行（有效性由 requireWxAuth 校验）
+ * - 正常浏览器 UA → 放行
+ * - requireWxAuth 二态：
+ *   - "ok"           → 有效凭证（Bearer 或 cookie），放行
+ *   - "unauthorized" → 无凭证或凭证失效（无效 Bearer / 取消关注）→ 调用方返回 401
+ */
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { isBotUA } from "../../utils/botUA";
+
+// mock h3：requireAuth 只用到这几个函数
+vi.mock("h3", () => ({
+  createError: vi.fn((opts: any) => ({ ...opts, __isH3Error: true })),
+  getHeader: vi.fn(),
+  getRequestHeader: vi.fn(),
+}));
+
+// mock wxAuthCheck：避免测试触发远程 HTTP（Bearer 与 cookie 统一走它）
+vi.mock("../../server/utils/wxAuthCheck", () => ({
+  verifyWxAuthOnceCached: vi.fn(async () => true),
+  getWxAuthCredential: vi.fn(() => ({})),
+  getBearerToken: vi.fn(() => null),
+}));
+
+// mock rateLimiter：避免加载 h3 defineEventHandler（getClientIp 供 requireAuth 日志用）
+vi.mock("../../server/middleware/rateLimiter", () => ({
+  getClientIp: vi.fn(() => "127.0.0.1"),
+}));
+
+import { requireHumanOrCredential, requireWxAuth } from "../../server/utils/requireAuth";
+import * as h3 from "h3";
+import * as wxAuthCheck from "../../server/utils/wxAuthCheck";
+
+const mockedVerifyWxAuthOnce = vi.mocked(wxAuthCheck.verifyWxAuthOnceCached);
+const mockedGetWxAuthCredential = vi.mocked(wxAuthCheck.getWxAuthCredential);
+const mockedGetBearerToken = vi.mocked(wxAuthCheck.getBearerToken);
+
+const mockedGetHeader = vi.mocked(h3.getHeader);
+const mockedGetRequestHeader = vi.mocked(h3.getRequestHeader);
+
+function makeEvent(headers: Record<string, string | undefined> = {}) {
+  return {
+    headers: { get: (k: string) => headers[k.toLowerCase()] },
+    context: {} as Record<string, any>,
+  } as any;
+}
+
+function expectH3Error(fn: () => void, statusCode: number) {
+  let err: any;
+  try {
+    fn();
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeDefined();
+  expect(err.__isH3Error).toBe(true);
+  expect(err.statusCode).toBe(statusCode);
+}
+
+describe("requireHumanOrCredential", () => {
+  beforeEach(() => {
+    mockedGetHeader.mockReset();
+    mockedGetRequestHeader.mockReset();
+  });
+
+  it("正常浏览器 UA 放行", () => {
+    mockedGetHeader.mockReturnValue(
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    );
+    mockedGetRequestHeader.mockReturnValue(undefined);
+    expect(() => requireHumanOrCredential(makeEvent())).not.toThrow();
+  });
+
+  it("无 UA 放行（小程序等真实渠道兜底）", () => {
+    mockedGetHeader.mockReturnValue(undefined);
+    mockedGetRequestHeader.mockReturnValue(undefined);
+    expect(() => requireHumanOrCredential(makeEvent())).not.toThrow();
+  });
+
+  it("curl UA 无凭证 → 403", () => {
+    mockedGetHeader.mockReturnValue("curl/8.7.1");
+    mockedGetRequestHeader.mockReturnValue(undefined);
+    expectH3Error(() => requireHumanOrCredential(makeEvent()), 403);
+  });
+
+  it("python-requests UA 无凭证 → 403", () => {
+    mockedGetHeader.mockReturnValue("python-requests/2.31.0");
+    mockedGetRequestHeader.mockReturnValue(undefined);
+    expectH3Error(() => requireHumanOrCredential(makeEvent()), 403);
+  });
+
+  it("Googlebot UA 无凭证 → 403", () => {
+    mockedGetHeader.mockReturnValue(
+      "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+    );
+    mockedGetRequestHeader.mockReturnValue(undefined);
+    expectH3Error(() => requireHumanOrCredential(makeEvent()), 403);
+  });
+
+  it("bot UA 带 Bearer token → 放行（有效性留给 requireWxAuth 校验）", () => {
+    mockedGetHeader.mockReturnValue("curl/8.7.1");
+    mockedGetRequestHeader.mockImplementation((e: any, name: string) =>
+      name.toLowerCase() === "authorization" ? "Bearer abc123" : undefined
+    );
+    expect(() => requireHumanOrCredential(makeEvent())).not.toThrow();
+  });
+});
+
+// 确保 isBotUA 兜底可用（引用不报错）
+describe("isBotUA（依赖引用完整性）", () => {
+  it("可正常判定", () => {
+    expect(isBotUA("curl/8.7.1")).toBe(true);
+    expect(isBotUA("Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36")).toBe(false);
+  });
+});
+
+describe("requireWxAuth", () => {
+  beforeEach(() => {
+    mockedVerifyWxAuthOnce.mockReset();
+    mockedGetWxAuthCredential.mockReset();
+    mockedGetBearerToken.mockReset();
+    mockedGetHeader.mockReset();
+    mockedGetRequestHeader.mockReset();
+  });
+
+  it("有效 Bearer token（wx-auth 校验通过）→ 返回 ok（小程序）", async () => {
+    mockedGetBearerToken.mockReturnValue("abc");
+    mockedGetWxAuthCredential.mockReturnValue({});
+    mockedVerifyWxAuthOnce.mockResolvedValue(true);
+    await expect(requireWxAuth(makeEvent())).resolves.toBe("ok");
+    expect(mockedVerifyWxAuthOnce).toHaveBeenCalled();
+  });
+
+  it("无效 Bearer token → 返回 unauthorized", async () => {
+    mockedGetBearerToken.mockReturnValue("invalid");
+    mockedGetWxAuthCredential.mockReturnValue({});
+    mockedVerifyWxAuthOnce.mockResolvedValue(false);
+    await expect(requireWxAuth(makeEvent())).resolves.toBe("unauthorized");
+  });
+
+  it("无 Bearer + 无凭证 cookie → unauthorized（401 引导重新认证）", async () => {
+    mockedGetBearerToken.mockReturnValue(null);
+    mockedGetWxAuthCredential.mockReturnValue({});
+    mockedVerifyWxAuthOnce.mockResolvedValue(false);
+    await expect(requireWxAuth(makeEvent())).resolves.toBe("unauthorized");
+    expect(mockedVerifyWxAuthOnce).toHaveBeenCalled();
+  });
+
+  it("无 Bearer + 有凭证但失效 → unauthorized（取消关注真人，401 引导重新关注）", async () => {
+    mockedGetBearerToken.mockReturnValue(null);
+    mockedGetWxAuthCredential.mockReturnValue({ token: "expired-token" });
+    mockedVerifyWxAuthOnce.mockResolvedValue(false);
+    await expect(requireWxAuth(makeEvent())).resolves.toBe("unauthorized");
+    expect(mockedVerifyWxAuthOnce).toHaveBeenCalled();
+  });
+
+  it("无 Bearer：cookie 校验通过 → 返回 ok", async () => {
+    mockedGetBearerToken.mockReturnValue(null);
+    mockedGetWxAuthCredential.mockReturnValue({ token: "tok" });
+    mockedVerifyWxAuthOnce.mockResolvedValue(true);
+    await expect(requireWxAuth(makeEvent())).resolves.toBe("ok");
+  });
+});

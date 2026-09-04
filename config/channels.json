@@ -1,0 +1,8 @@
+{
+  "_comment": "运行参数模板。",
+  "priorityChannels": [],
+  "defaultChannels": [],
+  "defaultConcurrency": 4,
+  "pluginTimeoutMs": 5000,
+  "cacheTtlMinutes": 30
+}
