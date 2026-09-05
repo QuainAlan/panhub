@@ -246,6 +246,8 @@ const {
 } = useSearch();
 const { settings, loadSettings } = useSettings();
 const { checkSearchAuth, forceVerify } = useWxAuth();
+// 自愿支持弹窗（floating-unlock）：每搜索 3 次自愿弹一次，不阻塞搜索
+const { maybeShowUnlockAd } = useUnlockAd();
 
 // 获取搜索选项（使用最新的用户设置）
 function getSearchOptions() {
@@ -306,6 +308,8 @@ async function onSearch() {
   // 微信公众号认证（强制：未认证先完成关注+验证码验证，成功后自动继续搜索）
   const authed = await checkSearchAuth();
   if (!authed) return;
+  // 自愿支持弹窗：每搜索 3 次自愿弹出一次（fire-and-forget，不阻塞本次搜索）
+  maybeShowUnlockAd();
   await doSearch();
 }
 

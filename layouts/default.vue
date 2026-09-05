@@ -41,6 +41,13 @@
     <span class="footer-sep">·</span>
     <span class="footer-copy">© {{ new Date().getFullYear() }} PanHub</span>
   </footer>
+
+  <!-- 自愿支持弹窗（floating-unlock WC，2026-09-05 起为自愿看）：平时不显示，
+       每搜索 3 次由 useUnlockAd 调 show() 自愿弹出一次，用户可随时关闭，
+       不影响任何操作。新版组件完全静态（无出码/验票/票据链路） -->
+  <ClientOnly>
+    <floating-unlock></floating-unlock>
+  </ClientOnly>
 </template>
 
 <script setup lang="ts">
@@ -66,6 +73,13 @@ useHead({
     },
     {
       src: "https://unpkg.com/@wu529778790/floating-qr@latest/dist/floating-qr.wc.js",
+      body: true,
+    },
+    {
+      // 自愿支持弹窗（floating-unlock，2026-09-05 起）：每搜索 3 次由
+      // useUnlockAd 调 show() 自愿弹出，可随时关闭；模板里的
+      // <floating-unlock> 标签由该脚本注册为 Web Component
+      src: "https://unpkg.com/@wu529778790/floating-unlock@latest/dist/floating-unlock.wc.js",
       body: true,
     },
   ],
