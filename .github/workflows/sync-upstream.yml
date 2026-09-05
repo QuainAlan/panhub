@@ -46,7 +46,9 @@ jobs:
       - name: Add upstream and fetch
         run: |
           git remote add upstream https://github.com/${UPSTREAM_REPO}.git || git remote set-url upstream https://github.com/${UPSTREAM_REPO}.git
-          git fetch upstream --tags --prune
+          # --force：上游重写历史后重建的同名 tag 与本地 sha 不同，
+          # 不加会被 git 以 "would clobber existing tag" 拒绝
+          git fetch upstream --tags --prune --force
 
       - name: Determine branches
         id: b
@@ -63,8 +65,28 @@ jobs:
         run: |
           set -e
           git checkout "${{ steps.b.outputs.local_default }}"
-          # 保留 fork 的提交，合并上游最新提交
-          git merge --no-edit "upstream/${{ steps.b.outputs.upstream_default }}"
+          branch="${{ steps.b.outputs.local_default }}"
+          push_args=()
+          upstream_ref="upstream/${{ steps.b.outputs.upstream_default }}"
+          # 上游重写过历史（如整体重开仓库）时两边没有共同祖先，
+          # 普通 merge 会报 "refusing to merge unrelated histories"
+          if git merge-base HEAD "${upstream_ref}" >/dev/null 2>&1; then
+            # 保留 fork 的提交，合并上游最新提交
+            git merge --no-edit "${upstream_ref}"
+          else
+            echo "::warning::与上游没有共同祖先（上游历史被重写），改用不相关历史合并"
+            # -X theirs：内容冲突以上游为准，尽量保住 fork 自己的提交
+            if git merge --allow-unrelated-histories --no-edit -X theirs "${upstream_ref}"; then
+              push_args+=(--force-with-lease)
+            else
+              # -X theirs 只能解内容冲突；重命名/增删等冲突解不动时，
+              # 兜底硬对齐上游（丢弃 fork 本地提交），保证同步链路不断
+              echo "::warning::自动合并失败，回退为硬对齐上游（会丢弃 fork 本地提交）"
+              git merge --abort 2>/dev/null || true
+              git reset --hard "${upstream_ref}"
+              push_args+=(--force-with-lease)
+            fi
+          fi
           # 未配置 SYNC_TOKEN 时回退 .github/workflows/：GITHUB_TOKEN 推送 workflow
           # 文件会被 GitHub 整次拒绝（refusing to allow a GitHub App to create or
           # update workflow ... without workflows permission），回退后 push 不触碰
@@ -74,10 +96,11 @@ jobs:
             # 合并后的上游版本，git checkout HEAD -- .github/workflows 等于没回退，
             # push 仍携带 workflow 变更，被 GITHUB_TOKEN 的 workflows 权限限制
             # 整次拒绝（refusing to allow a GitHub App to create or update workflow）
-            git checkout "origin/${{ steps.b.outputs.local_default }}" -- .github/workflows
+            git checkout "origin/${branch}" -- .github/workflows
             git commit --no-edit -m "chore(ci): keep local workflow files (no SYNC_TOKEN)" 2>/dev/null || true
           fi
-          git push origin "${{ steps.b.outputs.local_default }}"
+          git push "${push_args[@]}" origin "${branch}"
 
       - name: Sync tags
-        run: git push --tags origin
+        # 上游重写历史后 tag 指向的 sha 会变，需要 --force 才能覆盖 fork 上的旧 tag
+        run: git push --force origin --tags
