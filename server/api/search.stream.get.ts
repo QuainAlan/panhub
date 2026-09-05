@@ -1,22 +1,11 @@
 import {
   defineEventHandler,
   getQuery,
-  getRequestHeader,
   createError,
   createEventStream,
 } from "h3";
 import type { H3Event } from "h3";
 import { requireHumanOrCredential, requireWxAuth } from "../utils/requireAuth";
-import { getBearerToken } from "../utils/wxAuthCheck";
-import {
-  consumeQuota,
-  resetQuota,
-  FREE_SEARCH_LIMIT,
-} from "../core/services/searchQuotaService";
-import {
-  verifyUnlockGrant,
-  getUnlockTicketFromHeaders,
-} from "../utils/unlockVerify";
 import { parseList } from "../utils/parseQuery";
 import { getOrCreateSearchService } from "../core/services";
 import { getChannelConfigService } from "../core/services/channelConfigService";
@@ -67,41 +56,9 @@ export default defineEventHandler(async (event: H3Event) => {
     throw createError({ statusCode: 401, statusMessage: "wx auth required" });
   }
 
-  // ---- 页面端搜索配额（floating-unlock 看广告解锁）----
-  // 每次建流（「搜索」或「继续」）计 1 次，免费 FREE_SEARCH_LIMIT 次；
-  // 超限返回 402，前端弹 floating-unlock 广告弹窗，看完广告重试时带
-  // X-Unlock-Ticket / X-Unlock-Grant 头，服务端验票核销后清零放行。
-  // 豁免：小程序端（Bearer 凭证，页面端限制不适用）。
-  if (!getBearerToken(event)) {
-    const unlockTicket = getUnlockTicketFromHeaders(
-      getRequestHeader(event, "x-unlock-ticket"),
-      getRequestHeader(event, "x-unlock-grant")
-    );
-    if (unlockTicket) {
-      // 有票据：验真并核销（grant 一次性），通过即清零计数放行本次搜索；
-      // 不通过 fail-closed 402（不消耗新配额，前端可重新解锁再试）
-      const valid = await verifyUnlockGrant(unlockTicket);
-      if (!valid) {
-        throw createError({
-          statusCode: 402,
-          statusMessage: "unlock grant invalid",
-          data: { code: "QUOTA_EXCEEDED", freeLimit: FREE_SEARCH_LIMIT },
-        });
-      }
-      const openid = ((event.context as Record<string, any>)?.__wxAuthOpenid as string) || "";
-      resetQuota(openid);
-    } else {
-      const openid = ((event.context as Record<string, any>)?.__wxAuthOpenid as string) || "";
-      const used = consumeQuota(openid);
-      if (used > FREE_SEARCH_LIMIT) {
-        throw createError({
-          statusCode: 402,
-          statusMessage: "search quota exceeded",
-          data: { code: "QUOTA_EXCEEDED", used, freeLimit: FREE_SEARCH_LIMIT },
-        });
-      }
-    }
-  }
+  // ---- 页面端搜索配额已下线（2026-09-05）----
+  // floating-unlock 看广告解锁整体移除：强制广告转化低且伤体验。
+  // 登录（401 闸门）仍是搜索前提。
 
   const config = useRuntimeConfig();
   await getChannelConfigService().ensureLoaded();
